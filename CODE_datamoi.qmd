@@ -1,0 +1,2571 @@
+---
+title: "NEU"
+format: html
+editor: visual
+---
+
+```{r}
+# ============================================
+# PHAN 1: DATA AUDIT + CHON TREATMENT KHA THI
+# CHI IN RA MAN HINH
+# ============================================
+
+required_packages <- c("tidyverse", "janitor")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages) > 0) install.packages(new_packages)
+
+library(tidyverse)
+library(janitor)
+
+# Chon file train.csv
+train_raw <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names()
+
+cat("\n==============================\n")
+cat("1. DIMENSION\n")
+cat("==============================\n")
+print(dim(train_raw))
+
+cat("\n==============================\n")
+cat("2. COLUMN NAMES\n")
+cat("==============================\n")
+print(names(train_raw))
+
+cat("\n==============================\n")
+cat("3. FIRST 10 ROWS\n")
+cat("==============================\n")
+print(head(train_raw, 10))
+
+cat("\n==============================\n")
+cat("4. STRUCTURE\n")
+cat("==============================\n")
+glimpse(train_raw)
+
+cat("\n==============================\n")
+cat("5. MISSING VALUES\n")
+cat("==============================\n")
+missing_summary <- sapply(train_raw, function(x) sum(is.na(x)))
+print(missing_summary)
+
+cat("\n==============================\n")
+cat("6. RESPONSE DISTRIBUTION\n")
+cat("==============================\n")
+print(table(train_raw$response))
+print(prop.table(table(train_raw$response)))
+
+cat("\nOverall response rate:\n")
+print(mean(train_raw$response))
+
+cat("\n==============================\n")
+cat("7. CHANNEL FREQUENCY\n")
+cat("==============================\n")
+channel_freq <- train_raw %>%
+  count(policy_sales_channel, sort = TRUE)
+
+print(head(channel_freq, 20))
+
+cat("\n==============================\n")
+cat("8. CHANNEL SUMMARY\n")
+cat("==============================\n")
+channel_summary <- train_raw %>%
+  group_by(policy_sales_channel) %>%
+  summarise(
+    n = n(),
+    pct_sample = n() / nrow(train_raw),
+    response_rate = mean(response),
+    avg_age = mean(age, na.rm = TRUE),
+    avg_premium = mean(annual_premium, na.rm = TRUE),
+    pct_preinsured = mean(previously_insured, na.rm = TRUE),
+    pct_vehicle_damage = mean(vehicle_damage == "Yes", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n))
+
+print(head(channel_summary, 20))
+
+cat("\n==============================\n")
+cat("9. TOP 2 CHANNELS\n")
+cat("==============================\n")
+top2_channels <- channel_summary %>%
+  slice(1:2) %>%
+  pull(policy_sales_channel)
+
+print(top2_channels)
+
+top2_data <- train_raw %>%
+  filter(policy_sales_channel %in% top2_channels)
+
+cat("\n==============================\n")
+cat("10. TOP 2 CHANNEL COUNTS\n")
+cat("==============================\n")
+print(table(top2_data$policy_sales_channel))
+
+cat("\n==============================\n")
+cat("11. RESPONSE BY TOP 2 CHANNELS\n")
+cat("==============================\n")
+print(table(top2_data$policy_sales_channel, top2_data$response))
+
+cat("\nRow percentage:\n")
+print(round(prop.table(table(top2_data$policy_sales_channel, top2_data$response), 1), 4))
+
+cat("\n==============================\n")
+cat("12. TOP 2 SUMMARY\n")
+cat("==============================\n")
+top2_summary <- top2_data %>%
+  group_by(policy_sales_channel) %>%
+  summarise(
+    n = n(),
+    response_rate = mean(response),
+    avg_age = mean(age, na.rm = TRUE),
+    avg_premium = mean(annual_premium, na.rm = TRUE),
+    pct_female = mean(gender == "Female", na.rm = TRUE),
+    pct_preinsured = mean(previously_insured, na.rm = TRUE),
+    pct_vehicle_damage = mean(vehicle_damage == "Yes", na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(top2_summary)
+```
+
+```{r}
+# ============================================
+# PHAN 2: TAO MAU PHAN TICH + KHOA DESIGN
+# Main specification: channel 26 vs 124
+# ============================================
+
+required_packages <- c("tidyverse", "janitor")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages) > 0) install.packages(new_packages)
+
+library(tidyverse)
+library(janitor)
+
+# 1. Read raw data
+train_raw <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names()
+
+# 2. Keep only channels 26 and 124
+analysis_data <- train_raw %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  mutate(
+    treat = if_else(policy_sales_channel == 26, 1, 0),
+    outcome = response
+  ) %>%
+  select(
+    -id,
+    -response
+  )
+
+cat("\n==============================\n")
+cat("1. DIMENSION OF ANALYSIS DATA\n")
+cat("==============================\n")
+print(dim(analysis_data))
+
+cat("\n==============================\n")
+cat("2. FIRST 10 ROWS\n")
+cat("==============================\n")
+print(head(analysis_data, 10))
+
+cat("\n==============================\n")
+cat("3. TREATMENT COUNT\n")
+cat("==============================\n")
+print(table(analysis_data$treat))
+print(prop.table(table(analysis_data$treat)))
+
+cat("\n==============================\n")
+cat("4. OUTCOME COUNT\n")
+cat("==============================\n")
+print(table(analysis_data$outcome))
+print(prop.table(table(analysis_data$outcome)))
+
+cat("\n==============================\n")
+cat("5. OUTCOME BY TREATMENT\n")
+cat("==============================\n")
+print(table(analysis_data$treat, analysis_data$outcome))
+cat("\nRow percentage:\n")
+print(round(prop.table(table(analysis_data$treat, analysis_data$outcome), 1), 4))
+
+# 3. Recode factor variables
+analysis_data <- analysis_data %>%
+  mutate(
+    treat = factor(treat, levels = c(0, 1), labels = c("channel_124", "channel_26")),
+    outcome = as.numeric(outcome),
+    gender = factor(gender),
+    driving_license = factor(driving_license),
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+    vehicle_damage = factor(vehicle_damage)
+  )
+
+cat("\n==============================\n")
+cat("6. STRUCTURE AFTER RECODING\n")
+cat("==============================\n")
+glimpse(analysis_data)
+
+# 4. Numeric summaries
+cat("\n==============================\n")
+cat("7. NUMERIC SUMMARY\n")
+cat("==============================\n")
+numeric_summary <- analysis_data %>%
+  summarise(
+    n = n(),
+    age_mean = mean(age, na.rm = TRUE),
+    age_sd = sd(age, na.rm = TRUE),
+    age_min = min(age, na.rm = TRUE),
+    age_max = max(age, na.rm = TRUE),
+    premium_mean = mean(annual_premium, na.rm = TRUE),
+    premium_sd = sd(annual_premium, na.rm = TRUE),
+    premium_min = min(annual_premium, na.rm = TRUE),
+    premium_max = max(annual_premium, na.rm = TRUE),
+    vintage_mean = mean(vintage, na.rm = TRUE),
+    vintage_sd = sd(vintage, na.rm = TRUE),
+    vintage_min = min(vintage, na.rm = TRUE),
+    vintage_max = max(vintage, na.rm = TRUE)
+  )
+
+print(numeric_summary)
+
+cat("\n==============================\n")
+cat("8. SUMMARY AGE / PREMIUM / VINTAGE\n")
+cat("==============================\n")
+print(summary(analysis_data$age))
+print(summary(analysis_data$annual_premium))
+print(summary(analysis_data$vintage))
+
+# 5. Factor summaries
+cat("\n==============================\n")
+cat("9. FACTOR DISTRIBUTIONS\n")
+cat("==============================\n")
+
+cat("\nGender:\n")
+print(table(analysis_data$gender))
+print(round(prop.table(table(analysis_data$gender)), 4))
+
+cat("\nDriving license:\n")
+print(table(analysis_data$driving_license))
+print(round(prop.table(table(analysis_data$driving_license)), 4))
+
+cat("\nPreviously insured:\n")
+print(table(analysis_data$previously_insured))
+print(round(prop.table(table(analysis_data$previously_insured)), 4))
+
+cat("\nVehicle age:\n")
+print(table(analysis_data$vehicle_age))
+print(round(prop.table(table(analysis_data$vehicle_age)), 4))
+
+cat("\nVehicle damage:\n")
+print(table(analysis_data$vehicle_damage))
+print(round(prop.table(table(analysis_data$vehicle_damage)), 4))
+
+# 6. Numeric summaries by treatment
+cat("\n==============================\n")
+cat("10. NUMERIC VARIABLES BY TREATMENT\n")
+cat("==============================\n")
+
+by_treat_numeric <- analysis_data %>%
+  group_by(treat) %>%
+  summarise(
+    n = n(),
+    outcome_rate = mean(outcome),
+    age_mean = mean(age, na.rm = TRUE),
+    age_sd = sd(age, na.rm = TRUE),
+    premium_mean = mean(annual_premium, na.rm = TRUE),
+    premium_sd = sd(annual_premium, na.rm = TRUE),
+    vintage_mean = mean(vintage, na.rm = TRUE),
+    vintage_sd = sd(vintage, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(by_treat_numeric)
+
+# 7. Factor summaries by treatment
+cat("\n==============================\n")
+cat("11. FACTOR VARIABLES BY TREATMENT\n")
+cat("==============================\n")
+
+cat("\nGender by treatment:\n")
+print(table(analysis_data$treat, analysis_data$gender))
+print(round(prop.table(table(analysis_data$treat, analysis_data$gender), 1), 4))
+
+cat("\nPreviously insured by treatment:\n")
+print(table(analysis_data$treat, analysis_data$previously_insured))
+print(round(prop.table(table(analysis_data$treat, analysis_data$previously_insured), 1), 4))
+
+cat("\nVehicle age by treatment:\n")
+print(table(analysis_data$treat, analysis_data$vehicle_age))
+print(round(prop.table(table(analysis_data$treat, analysis_data$vehicle_age), 1), 4))
+
+cat("\nVehicle damage by treatment:\n")
+print(table(analysis_data$treat, analysis_data$vehicle_damage))
+print(round(prop.table(table(analysis_data$treat, analysis_data$vehicle_damage), 1), 4))
+
+# 8. Plots for checking numeric distributions
+par(mfrow = c(2, 2))
+
+hist(analysis_data$age,
+     main = "Age",
+     xlab = "Age",
+     col = "lightgray",
+     border = "white")
+
+hist(analysis_data$annual_premium,
+     main = "Annual Premium",
+     xlab = "Annual Premium",
+     col = "lightgray",
+     border = "white")
+
+hist(log1p(analysis_data$annual_premium),
+     main = "log(1 + Annual Premium)",
+     xlab = "log(1 + Annual Premium)",
+     col = "lightgray",
+     border = "white")
+
+hist(analysis_data$vintage,
+     main = "Vintage",
+     xlab = "Vintage",
+     col = "lightgray",
+     border = "white")
+
+par(mfrow = c(1, 1))
+
+# 9. Quantiles for annual premium
+cat("\n==============================\n")
+cat("12. ANNUAL PREMIUM QUANTILES\n")
+cat("==============================\n")
+print(quantile(analysis_data$annual_premium,
+               probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+               na.rm = TRUE))
+
+# 10. Create optional transformed version
+analysis_data <- analysis_data %>%
+  mutate(
+    log_annual_premium = log1p(annual_premium)
+  )
+
+cat("\n==============================\n")
+cat("13. CHECK LOG PREMIUM SUMMARY\n")
+cat("==============================\n")
+print(summary(analysis_data$log_annual_premium))
+```
+
+```{r}
+# ============================================================
+# PHAN 4. DAG AND FORMAL ADJUSTMENT CHECK
+# ============================================================
+
+packages_dag <- c("dagitty", "ggdag", "DiagrammeR")
+
+new_packages_dag <- packages_dag[!(packages_dag %in% installed.packages()[, "Package"])]
+
+if (length(new_packages_dag) > 0) {
+  install.packages(new_packages_dag)
+}
+
+library(dagitty)
+library(ggdag)
+library(DiagrammeR)
+
+# ------------------------------------------------------------
+# 4.1 Formal DAG for identification check
+# This DAG contains observed pre-treatment covariates.
+# It is used to check the proposed adjustment set formally.
+# ------------------------------------------------------------
+
+dag_observed <- dagitty("
+dag {
+  treat [exposure]
+  outcome [outcome]
+
+  gender -> treat
+  age -> treat
+  region_code -> treat
+  previously_insured -> treat
+  vehicle_age -> treat
+  vehicle_damage -> treat
+  log_annual_premium -> treat
+  vintage -> treat
+
+  gender -> outcome
+  age -> outcome
+  region_code -> outcome
+  previously_insured -> outcome
+  vehicle_age -> outcome
+  vehicle_damage -> outcome
+  log_annual_premium -> outcome
+  vintage -> outcome
+
+  treat -> outcome
+}
+")
+
+coordinates(dag_observed) <- list(
+  x = c(
+    gender = 0,
+    age = 0,
+    region_code = 0,
+    previously_insured = 0,
+    vehicle_age = 0,
+    vehicle_damage = 0,
+    log_annual_premium = 0,
+    vintage = 0,
+    treat = 2,
+    outcome = 4
+  ),
+  y = c(
+    gender = 4,
+    age = 3,
+    region_code = 2,
+    previously_insured = 1,
+    vehicle_age = 0,
+    vehicle_damage = -1,
+    log_annual_premium = -2,
+    vintage = -3,
+    treat = 0.5,
+    outcome = 0.5
+  )
+)
+
+cat("\n==============================\n")
+cat("4.1 FORMAL DAG CHECK\n")
+cat("==============================\n")
+
+cat("\nExposure variable:\n")
+print(exposures(dag_observed))
+
+cat("\nOutcome variable:\n")
+print(outcomes(dag_observed))
+
+cat("\nMinimal adjustment sets suggested by dagitty:\n")
+minimal_sets <- adjustmentSets(
+  dag_observed,
+  exposure = "treat",
+  outcome = "outcome",
+  type = "minimal"
+)
+
+print(minimal_sets)
+
+proposed_adjustment_set <- c(
+  "gender",
+  "age",
+  "region_code",
+  "previously_insured",
+  "vehicle_age",
+  "vehicle_damage",
+  "log_annual_premium",
+  "vintage"
+)
+
+cat("\nProposed adjustment set used in this thesis:\n")
+print(proposed_adjustment_set)
+
+cat("\nCheck whether the proposed adjustment set is valid:\n")
+
+valid_adjustment <- tryCatch(
+  {
+    isAdjustmentSet(
+      dag_observed,
+      exposure = "treat",
+      outcome = "outcome",
+      Z = proposed_adjustment_set
+    )
+  },
+  error = function(e) {
+    paste("Could not run isAdjustmentSet():", e$message)
+  }
+)
+
+print(valid_adjustment)
+
+cat("\nImplied conditional independencies from the observed DAG:\n")
+print(impliedConditionalIndependencies(dag_observed))
+
+
+# ------------------------------------------------------------
+# 4.2 ggdag visualization for formal DAG
+# This is mainly for checking, not necessarily final thesis figure.
+# ------------------------------------------------------------
+
+ggdag(
+  dag_observed,
+  text = TRUE,
+  use_labels = "name"
+) +
+  theme_dag() +
+  ggtitle("Formal DAG for Adjustment Set Check")
+
+
+# ------------------------------------------------------------
+# 4.3 Sensitivity DAG with unobserved factor U
+# This is NOT the main identification DAG.
+# It is used to show the limitation:
+# if U truly confounds treatment and outcome, observed adjustment alone
+# cannot fully remove hidden bias.
+# ------------------------------------------------------------
+
+dag_with_u <- dagitty("
+dag {
+  treat [exposure]
+  outcome [outcome]
+  U [latent]
+
+  gender -> treat
+  age -> treat
+  region_code -> treat
+  previously_insured -> treat
+  vehicle_age -> treat
+  vehicle_damage -> treat
+  log_annual_premium -> treat
+  vintage -> treat
+
+  gender -> outcome
+  age -> outcome
+  region_code -> outcome
+  previously_insured -> outcome
+  vehicle_age -> outcome
+  vehicle_damage -> outcome
+  log_annual_premium -> outcome
+  vintage -> outcome
+
+  treat -> outcome
+
+  U -> treat
+  U -> outcome
+}
+")
+
+cat("\n==============================\n")
+cat("4.2 SENSITIVITY DAG WITH UNOBSERVED U\n")
+cat("==============================\n")
+
+cat("\nAdjustment sets when U is treated as a true unobserved confounder:\n")
+cat("If no valid observed adjustment set is returned, this is expected and should be discussed as a limitation.\n")
+
+print(
+  adjustmentSets(
+    dag_with_u,
+    exposure = "treat",
+    outcome = "outcome",
+    type = "minimal"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 4.4 Final presentation DAG for thesis
+# This figure is for the thesis body.
+# It shows observed covariates and potential unobserved confounding.
+# ------------------------------------------------------------
+
+grViz("
+digraph causal_dag {
+
+  graph [
+    layout = dot,
+    rankdir = LR,
+    bgcolor = white,
+    margin = 0.1,
+    nodesep = 0.55,
+    ranksep = 0.75,
+    labelloc = t,
+    label = 'DAG: Effect of Policy Sales Channel on Customer Response',
+    fontsize = 22,
+    fontname = 'Times New Roman'
+  ]
+
+  node [
+    shape = box,
+    style = 'rounded,filled',
+    fontname = 'Times New Roman',
+    fontsize = 14,
+    penwidth = 1.5,
+    margin = 0.15
+  ]
+
+  edge [
+    fontname = 'Times New Roman',
+    fontsize = 12,
+    arrowsize = 0.8,
+    penwidth = 1.4
+  ]
+
+  demographics [
+    label = 'Demographics\\nGender, Age, Region Code',
+    fillcolor = '#E6EEF8',
+    color = '#234C86'
+  ]
+
+  insurance [
+    label = 'Insurance History\\nPreviously Insured',
+    fillcolor = '#E6EEF8',
+    color = '#234C86'
+  ]
+
+  vehicle [
+    label = 'Vehicle Profile\\nVehicle Age, Vehicle Damage',
+    fillcolor = '#E6EEF8',
+    color = '#234C86'
+  ]
+
+  financial [
+    label = 'Financial Profile\\nLog Annual Premium',
+    fillcolor = '#E6EEF8',
+    color = '#234C86'
+  ]
+
+  relationship [
+    label = 'Relationship Length\\nVintage',
+    fillcolor = '#E6EEF8',
+    color = '#234C86'
+  ]
+
+  treatment [
+    label = 'Treatment\\nPolicy Sales Channel\\n26 vs 124',
+    fillcolor = '#365E9D',
+    fontcolor = white,
+    color = '#234C86',
+    fontsize = 15,
+    penwidth = 2
+  ]
+
+  outcome [
+    label = 'Outcome\\nCustomer Response',
+    fillcolor = '#DDECCB',
+    color = '#5D7F3A',
+    fontsize = 15,
+    penwidth = 2
+  ]
+
+  unobserved [
+    label = 'U: Unobserved Factors\\nLead Quality\\nInternal Allocation Rule\\nLatent Customer Intent',
+    fillcolor = '#FCEEEE',
+    color = '#8A4A4A',
+    style = 'rounded,filled,dashed',
+    penwidth = 1.5
+  ]
+
+  note [
+    label = 'Solid arrows: assumed causal relationships\\nDashed arrows: potential unobserved confounding\\nObserved covariates are adjusted in the empirical models',
+    fillcolor = white,
+    color = '#777777',
+    style = 'rounded,dashed',
+    fontsize = 12
+  ]
+
+  demographics -> treatment
+  insurance -> treatment
+  vehicle -> treatment
+  financial -> treatment
+  relationship -> treatment
+
+  demographics -> outcome
+  insurance -> outcome
+  vehicle -> outcome
+  financial -> outcome
+  relationship -> outcome
+
+  treatment -> outcome [
+    label = 'causal effect of interest',
+    penwidth = 2.6,
+    color = black
+  ]
+
+  unobserved -> treatment [
+    style = dashed,
+    color = '#333333',
+    penwidth = 1.5
+  ]
+
+  unobserved -> outcome [
+    style = dashed,
+    color = '#333333',
+    penwidth = 1.5
+  ]
+
+  {rank = same; demographics; insurance; vehicle; financial; relationship}
+  {rank = same; treatment}
+  {rank = same; outcome}
+}
+")
+```
+
+```{r}
+# ============================================
+# PHAN 4: BASELINE IMBALANCE
+# ============================================
+
+required_packages <- c("tidyverse", "janitor", "tableone", "cobalt")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages) > 0) install.packages(new_packages)
+
+library(tidyverse)
+library(janitor)
+library(tableone)
+library(cobalt)
+
+# 1. Rebuild analysis_data only if it does not exist
+if (!exists("analysis_data")) {
+  train_raw <- read_csv(file.choose(), show_col_types = FALSE) %>%
+    clean_names()
+  
+  analysis_data <- train_raw %>%
+    filter(policy_sales_channel %in% c(26, 124)) %>%
+    mutate(
+      treat = if_else(policy_sales_channel == 26, 1, 0),
+      outcome = response,
+      log_annual_premium = log1p(annual_premium)
+    ) %>%
+    select(
+      gender,
+      age,
+      region_code,
+      previously_insured,
+      vehicle_age,
+      vehicle_damage,
+      annual_premium,
+      log_annual_premium,
+      vintage,
+      treat,
+      outcome
+    ) %>%
+    mutate(
+      treat = factor(treat, levels = c(0, 1), labels = c("channel_124", "channel_26")),
+      gender = factor(gender),
+      region_code = factor(region_code),
+      previously_insured = factor(previously_insured),
+      vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+      vehicle_damage = factor(vehicle_damage)
+    )
+}
+
+# 2. Define covariates
+core_adjustment_set <- c(
+  "gender",
+  "age",
+  "region_code",
+  "previously_insured",
+  "vehicle_age",
+  "vehicle_damage",
+  "log_annual_premium",
+  "vintage"
+)
+
+factor_vars <- c(
+  "gender",
+  "region_code",
+  "previously_insured",
+  "vehicle_age",
+  "vehicle_damage"
+)
+
+cat("\n==============================\n")
+cat("1. CORE ADJUSTMENT SET\n")
+cat("==============================\n")
+print(core_adjustment_set)
+
+# 3. Baseline table
+cat("\n==============================\n")
+cat("2. BASELINE TABLE WITH SMD\n")
+cat("==============================\n")
+
+tab1 <- CreateTableOne(
+  vars = core_adjustment_set,
+  strata = "treat",
+  data = analysis_data,
+  factorVars = factor_vars,
+  test = FALSE
+)
+
+print(tab1, smd = TRUE)
+
+# 4. Extract SMDs in a cleaner table
+cat("\n==============================\n")
+cat("3. SMD TABLE (CLEANER)\n")
+cat("==============================\n")
+
+smd_obj <- ExtractSmd(tab1)
+
+smd_table <- tibble(
+  variable = names(smd_obj),
+  smd = as.numeric(smd_obj)
+) %>%
+  arrange(desc(abs(smd)))
+
+print(smd_table)
+
+# 5. Flag imbalance levels
+cat("\n==============================\n")
+cat("4. IMBALANCE LEVELS\n")
+cat("==============================\n")
+
+smd_flagged <- smd_table %>%
+  mutate(
+    imbalance_level = case_when(
+      abs(smd) < 0.10 ~ "Low",
+      abs(smd) < 0.20 ~ "Moderate",
+      abs(smd) < 0.50 ~ "Substantial",
+      TRUE ~ "High"
+    )
+  )
+
+print(smd_flagged)
+
+# 6. Top most imbalanced variables
+cat("\n==============================\n")
+cat("5. TOP 10 MOST IMBALANCED VARIABLES\n")
+cat("==============================\n")
+print(head(smd_flagged, 10))
+
+# 7. Love plot
+cat("\n==============================\n")
+cat("6. LOVE PLOT\n")
+cat("==============================\n")
+
+bal_raw <- bal.tab(
+  treat ~ gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  data = analysis_data,
+  estimand = "ATE",
+  un = TRUE
+)
+
+print(bal_raw)
+
+love.plot(
+  bal_raw,
+  stats = "mean.diffs",
+  thresholds = c(m = 0.1),
+  abs = TRUE,
+  var.order = "unadjusted",
+  colors = c("grey40"),
+  shapes = c(16),
+  sample.names = c("Unadjusted")
+)
+
+# 8. Quick numeric comparison table
+cat("\n==============================\n")
+cat("7. NUMERIC COMPARISON\n")
+cat("==============================\n")
+
+numeric_compare <- analysis_data %>%
+  group_by(treat) %>%
+  summarise(
+    n = n(),
+    outcome_rate = mean(outcome),
+    age_mean = mean(age, na.rm = TRUE),
+    age_sd = sd(age, na.rm = TRUE),
+    log_premium_mean = mean(log_annual_premium, na.rm = TRUE),
+    log_premium_sd = sd(log_annual_premium, na.rm = TRUE),
+    vintage_mean = mean(vintage, na.rm = TRUE),
+    vintage_sd = sd(vintage, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(numeric_compare)
+
+# 9. Quick categorical comparison tables
+cat("\n==============================\n")
+cat("8. CATEGORICAL COMPARISON\n")
+cat("==============================\n")
+
+cat("\nGender by treatment:\n")
+print(round(prop.table(table(analysis_data$treat, analysis_data$gender), 1), 4))
+
+cat("\nPreviously insured by treatment:\n")
+print(round(prop.table(table(analysis_data$treat, analysis_data$previously_insured), 1), 4))
+
+cat("\nVehicle age by treatment:\n")
+print(round(prop.table(table(analysis_data$treat, analysis_data$vehicle_age), 1), 4))
+
+cat("\nVehicle damage by treatment:\n")
+print(round(prop.table(table(analysis_data$treat, analysis_data$vehicle_damage), 1), 4))
+```
+
+```{r}
+# ============================================
+# 4.3 BENCHMARK MODELS
+# Raw difference + LPM + Logistic + G-computation
+# ============================================
+
+library(tidyverse)
+library(janitor)
+library(lmtest)
+library(sandwich)
+
+# 1. Đọc và tạo mẫu phân tích
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    treat = factor(
+      if_else(policy_sales_channel == 26, 1, 0),
+      levels = c(0, 1),
+      labels = c("channel_124", "channel_26")
+    ),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(
+      vehicle_age,
+      levels = c("< 1 Year", "1-2 Year", "> 2 Years")
+    ),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+# Công thức benchmark
+benchmark_formula <- outcome ~ treat_num + gender + age + region_code +
+  previously_insured + vehicle_age + vehicle_damage +
+  log_annual_premium + vintage
+
+
+# ============================================
+# 4.3.1 RAW DIFFERENCE
+# ============================================
+
+cat("\n==============================\n")
+cat("4.3.1 RAW DIFFERENCE\n")
+cat("==============================\n")
+
+raw_tab <- analysis_data %>%
+  group_by(treat) %>%
+  summarise(
+    n = n(),
+    response_rate = mean(outcome),
+    .groups = "drop"
+  )
+
+print(raw_tab)
+
+raw_diff <- raw_tab$response_rate[raw_tab$treat == "channel_26"] -
+  raw_tab$response_rate[raw_tab$treat == "channel_124"]
+
+cat("\nRaw difference channel_26 - channel_124 =",
+    round(raw_diff, 5), "\n")
+
+cat("Raw difference in percentage points =",
+    round(raw_diff * 100, 3), "percentage points\n")
+
+
+# ============================================
+# 4.3.2 LINEAR PROBABILITY MODEL
+# ============================================
+
+cat("\n==============================\n")
+cat("4.3.2 LINEAR PROBABILITY MODEL\n")
+cat("==============================\n")
+
+lpm_model <- lm(
+  benchmark_formula,
+  data = analysis_data
+)
+
+cat("\nLPM coefficient table with robust SE:\n")
+lpm_robust <- coeftest(
+  lpm_model,
+  vcov = vcovHC(lpm_model, type = "HC1")
+)
+
+print(lpm_robust)
+
+cat("\nTreatment coefficient from LPM:\n")
+print(lpm_robust["treat_num", ])
+
+cat("\nInterpretation:\n")
+cat("LPM adjusted difference =",
+    round(coef(lpm_model)["treat_num"], 5),
+    "or",
+    round(coef(lpm_model)["treat_num"] * 100, 3),
+    "percentage points\n")
+
+
+# ============================================
+# 4.3.3 LOGISTIC BENCHMARK
+# ============================================
+
+cat("\n==============================\n")
+cat("4.3.3 LOGISTIC BENCHMARK\n")
+cat("==============================\n")
+
+logit_model <- glm(
+  benchmark_formula,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+cat("\nLogit coefficient table with robust SE:\n")
+logit_robust <- coeftest(
+  logit_model,
+  vcov = vcovHC(logit_model, type = "HC1")
+)
+
+print(logit_robust)
+
+cat("\nTreatment coefficient from Logit:\n")
+print(logit_robust["treat_num", ])
+
+odds_ratio <- exp(coef(logit_model)["treat_num"])
+
+cat("\nOdds ratio for treatment:\n")
+cat("OR =", round(odds_ratio, 4), "\n")
+
+
+# ============================================
+# 4.3.4 G-COMPUTATION STYLE PREDICTED PROBABILITIES
+# ============================================
+
+cat("\n==============================\n")
+cat("4.3.4 G-COMPUTATION PREDICTED PROBABILITIES\n")
+cat("==============================\n")
+
+data_t0 <- analysis_data
+data_t0$treat_num <- 0
+
+data_t1 <- analysis_data
+data_t1$treat_num <- 1
+
+pred_t0 <- mean(
+  predict(logit_model, newdata = data_t0, type = "response")
+)
+
+pred_t1 <- mean(
+  predict(logit_model, newdata = data_t1, type = "response")
+)
+
+gcomp_diff <- pred_t1 - pred_t0
+
+cat("Predicted response if all assigned to channel_124 =",
+    round(pred_t0, 5), "\n")
+
+cat("Predicted response if all assigned to channel_26  =",
+    round(pred_t1, 5), "\n")
+
+cat("G-computation difference =",
+    round(gcomp_diff, 5), "\n")
+
+cat("G-computation difference in percentage points =",
+    round(gcomp_diff * 100, 3), "percentage points\n")
+
+
+# ============================================
+# FINAL BENCHMARK SUMMARY TABLE
+# ============================================
+
+cat("\n==============================\n")
+cat("BENCHMARK SUMMARY TABLE\n")
+cat("==============================\n")
+
+benchmark_summary <- tibble(
+  model = c(
+    "Raw difference",
+    "LPM adjusted",
+    "Logit OR",
+    "Logit g-computation difference"
+  ),
+  estimate = c(
+    raw_diff,
+    coef(lpm_model)["treat_num"],
+    odds_ratio,
+    gcomp_diff
+  ),
+  interpretation = c(
+    "Difference in response rate",
+    "Adjusted percentage-point effect",
+    "Odds ratio",
+    "Average predicted probability difference"
+  )
+)
+
+print(benchmark_summary)
+```
+
+```{r}
+# ============================================
+# PHAN 5: PROPENSITY SCORE + OVERLAP
+# ============================================
+
+rm(list = c("analysis_data", "ps_model", "ps_summary", "overlap_summary"))
+
+library(tidyverse)
+library(janitor)
+
+# 1. Read and rebuild analysis sample
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    treat = factor(if_else(policy_sales_channel == 26, 1, 0),
+                   levels = c(0, 1),
+                   labels = c("channel_124", "channel_26")),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+cat("\n==============================\n")
+cat("1. ANALYSIS DATA CHECK\n")
+cat("==============================\n")
+print(dim(analysis_data))
+print(table(analysis_data$treat))
+
+# 2. Propensity score model
+ps_model <- glm(
+  treat_num ~ gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+cat("\n==============================\n")
+cat("2. PROPENSITY MODEL FIT\n")
+cat("==============================\n")
+print(summary(ps_model)$coefficients[1:10, , drop = FALSE])  # in bớt cho gọn
+cat("\nAIC:\n")
+print(AIC(ps_model))
+
+# 3. Predict propensity score
+analysis_data <- analysis_data %>%
+  mutate(
+    pscore = predict(ps_model, type = "response")
+  )
+
+cat("\n==============================\n")
+cat("3. OVERALL PSCORE SUMMARY\n")
+cat("==============================\n")
+print(summary(analysis_data$pscore))
+
+cat("\nQuantiles of pscore:\n")
+print(quantile(analysis_data$pscore,
+               probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+               na.rm = TRUE))
+
+# 4. PS summary by treatment group
+cat("\n==============================\n")
+cat("4. PSCORE BY TREATMENT\n")
+cat("==============================\n")
+
+ps_summary <- analysis_data %>%
+  group_by(treat) %>%
+  summarise(
+    n = n(),
+    mean_ps = mean(pscore),
+    sd_ps = sd(pscore),
+    min_ps = min(pscore),
+    q01 = quantile(pscore, 0.01),
+    q05 = quantile(pscore, 0.05),
+    q25 = quantile(pscore, 0.25),
+    median_ps = median(pscore),
+    q75 = quantile(pscore, 0.75),
+    q95 = quantile(pscore, 0.95),
+    q99 = quantile(pscore, 0.99),
+    max_ps = max(pscore),
+    .groups = "drop"
+  )
+
+print(ps_summary)
+
+# 5. Raw common support using min-max
+treated_ps <- analysis_data$pscore[analysis_data$treat_num == 1]
+control_ps <- analysis_data$pscore[analysis_data$treat_num == 0]
+
+lower_cs <- max(min(treated_ps), min(control_ps))
+upper_cs <- min(max(treated_ps), max(control_ps))
+
+analysis_data <- analysis_data %>%
+  mutate(
+    in_common_support = if_else(pscore >= lower_cs & pscore <= upper_cs, 1, 0)
+  )
+
+cat("\n==============================\n")
+cat("5. MIN-MAX COMMON SUPPORT\n")
+cat("==============================\n")
+cat("Lower bound =", round(lower_cs, 5), "\n")
+cat("Upper bound =", round(upper_cs, 5), "\n")
+
+print(table(analysis_data$in_common_support))
+print(round(prop.table(table(analysis_data$in_common_support)), 4))
+
+cat("\nBy treatment:\n")
+print(table(analysis_data$treat, analysis_data$in_common_support))
+print(round(prop.table(table(analysis_data$treat, analysis_data$in_common_support), 1), 4))
+
+# 6. Stricter overlap using 1st and 99th percentiles
+lower_trim <- max(
+  quantile(treated_ps, 0.01),
+  quantile(control_ps, 0.01)
+)
+
+upper_trim <- min(
+  quantile(treated_ps, 0.99),
+  quantile(control_ps, 0.99)
+)
+
+analysis_data <- analysis_data %>%
+  mutate(
+    in_trimmed_support = if_else(pscore >= lower_trim & pscore <= upper_trim, 1, 0)
+  )
+
+cat("\n==============================\n")
+cat("6. 1%-99% TRIMMED SUPPORT\n")
+cat("==============================\n")
+cat("Lower trimmed bound =", round(lower_trim, 5), "\n")
+cat("Upper trimmed bound =", round(upper_trim, 5), "\n")
+
+print(table(analysis_data$in_trimmed_support))
+print(round(prop.table(table(analysis_data$in_trimmed_support)), 4))
+
+cat("\nBy treatment:\n")
+print(table(analysis_data$treat, analysis_data$in_trimmed_support))
+print(round(prop.table(table(analysis_data$treat, analysis_data$in_trimmed_support), 1), 4))
+
+# 7. Overlap plots
+par(mfrow = c(1, 2))
+
+hist(analysis_data$pscore[analysis_data$treat_num == 0],
+     main = "Propensity score: channel_124",
+     xlab = "pscore", col = "lightgray", border = "white")
+
+hist(analysis_data$pscore[analysis_data$treat_num == 1],
+     main = "Propensity score: channel_26",
+     xlab = "pscore", col = "lightgray", border = "white")
+
+par(mfrow = c(1, 1))
+
+ggplot(analysis_data, aes(x = pscore, color = treat, fill = treat)) +
+  geom_density(alpha = 0.25) +
+  labs(
+    title = "Propensity score overlap by treatment group",
+    x = "Propensity score",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+# 8. Simple diagnostic buckets
+cat("\n==============================\n")
+cat("7. PSCORE BUCKET CHECK\n")
+cat("==============================\n")
+
+analysis_data <- analysis_data %>%
+  mutate(
+    pscore_bucket = cut(
+      pscore,
+      breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1),
+      include.lowest = TRUE
+    )
+  )
+
+bucket_tab <- table(analysis_data$pscore_bucket, analysis_data$treat)
+print(bucket_tab)
+print(round(prop.table(bucket_tab, 2), 4))
+
+```
+
+```{r}
+# ============================================
+# PHAN 6: BENCHMARK MODELS
+# ============================================
+
+rm(list = c("analysis_data", "naive_diff", "lpm1", "logit1"))
+
+library(tidyverse)
+library(janitor)
+
+# 1. Read and rebuild analysis sample
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    treat = factor(if_else(policy_sales_channel == 26, 1, 0),
+                   levels = c(0, 1),
+                   labels = c("channel_124", "channel_26")),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+cat("\n==============================\n")
+cat("1. RAW DIFFERENCE IN OUTCOME\n")
+cat("==============================\n")
+
+raw_tab <- analysis_data %>%
+  group_by(treat) %>%
+  summarise(
+    n = n(),
+    response_rate = mean(outcome),
+    .groups = "drop"
+  )
+
+print(raw_tab)
+
+naive_diff <- with(raw_tab, response_rate[treat == "channel_26"] - response_rate[treat == "channel_124"])
+cat("\nRaw difference (channel_26 - channel_124) =", round(naive_diff, 5), "\n")
+
+cat("\n==============================\n")
+cat("2. LINEAR PROBABILITY MODEL\n")
+cat("==============================\n")
+
+lpm1 <- lm(
+  outcome ~ treat_num + gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  data = analysis_data
+)
+
+print(summary(lpm1))
+
+cat("\nCoefficient on treat_num (LPM):\n")
+print(coef(summary(lpm1))["treat_num", ])
+
+cat("\n==============================\n")
+cat("3. LOGISTIC BENCHMARK MODEL\n")
+cat("==============================\n")
+
+logit1 <- glm(
+  outcome ~ treat_num + gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+print(summary(logit1))
+
+cat("\nCoefficient on treat_num (Logit):\n")
+print(coef(summary(logit1))["treat_num", ])
+
+cat("\nOdds ratio of treat_num:\n")
+print(exp(coef(logit1)["treat_num"]))
+
+# 4. Simple predicted probabilities by treatment holding observed data
+analysis_data_0 <- analysis_data
+analysis_data_0$treat_num <- 0
+
+analysis_data_1 <- analysis_data
+analysis_data_1$treat_num <- 1
+
+pred0 <- mean(predict(logit1, newdata = analysis_data_0, type = "response"))
+pred1 <- mean(predict(logit1, newdata = analysis_data_1, type = "response"))
+
+cat("\n==============================\n")
+cat("4. G-COMPUTATION STYLE AVERAGE PREDICTED PROBABILITIES\n")
+cat("==============================\n")
+cat("Predicted outcome if all in channel_124 =", round(pred0, 5), "\n")
+cat("Predicted outcome if all in channel_26  =", round(pred1, 5), "\n")
+cat("Difference =", round(pred1 - pred0, 5), "\n")
+```
+
+```{r}
+# ============================================
+# PHAN 7: PSM + IPW + AIPW
+# ============================================
+
+rm(list = c(
+  "analysis_data", "m.out", "matched_data", "w_ate",
+  "outcome_model", "m1", "m0", "aipw_score"
+))
+
+library(tidyverse)
+library(janitor)
+library(MatchIt)
+library(cobalt)
+
+# 1. Rebuild analysis data
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    treat = factor(if_else(policy_sales_channel == 26, 1, 0),
+                   levels = c(0, 1),
+                   labels = c("channel_124", "channel_26")),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+# Common formula
+fmla <- treat_num ~ gender + age + region_code + previously_insured +
+  vehicle_age + vehicle_damage + log_annual_premium + vintage
+
+# ------------------------------------------------
+# A. PSM
+# ------------------------------------------------
+cat("\n==============================\n")
+cat("A. PROPENSITY SCORE MATCHING\n")
+cat("==============================\n")
+
+m.out <- matchit(
+  formula = fmla,
+  data = analysis_data,
+  method = "nearest",
+  distance = "glm",
+  link = "logit",
+  estimand = "ATT",
+  replace = FALSE,
+  caliper = 0.1
+)
+
+print(summary(m.out))
+
+cat("\nBalance after matching:\n")
+print(bal.tab(m.out, un = TRUE))
+
+love.plot(
+  bal.tab(m.out, un = TRUE),
+  stats = "mean.diffs",
+  abs = TRUE,
+  thresholds = c(m = 0.1),
+  var.order = "unadjusted"
+)
+
+matched_data <- match.data(m.out)
+
+cat("\nMatched sample size:\n")
+print(dim(matched_data))
+
+cat("\nTreatment count in matched sample:\n")
+print(table(matched_data$treat))
+
+cat("\nOutcome by treatment in matched sample:\n")
+matched_tab <- matched_data %>%
+  group_by(treat) %>%
+  summarise(
+    n = n(),
+    response_rate = weighted.mean(outcome, weights),
+    .groups = "drop"
+  )
+
+print(matched_tab)
+
+psm_att <- with(matched_tab,
+                response_rate[treat == "channel_26"] -
+                  response_rate[treat == "channel_124"])
+
+cat("\nPSM ATT =", round(psm_att, 5), "\n")
+
+# ------------------------------------------------
+# B. IPW
+# ------------------------------------------------
+cat("\n==============================\n")
+cat("B. INVERSE PROBABILITY WEIGHTING\n")
+cat("==============================\n")
+
+ps_model <- glm(
+  fmla,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+analysis_data <- analysis_data %>%
+  mutate(
+    pscore = predict(ps_model, type = "response")
+  )
+
+# Stabilized ATE weights
+p_treat <- mean(analysis_data$treat_num)
+
+analysis_data <- analysis_data %>%
+  mutate(
+    w_ate = if_else(
+      treat_num == 1,
+      p_treat / pscore,
+      (1 - p_treat) / (1 - pscore)
+    )
+  )
+
+cat("\nWeight summary:\n")
+print(summary(analysis_data$w_ate))
+
+cat("\nWeight quantiles:\n")
+print(quantile(analysis_data$w_ate,
+               probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+               na.rm = TRUE))
+
+cat("\nWeighted balance:\n")
+ipw_bal <- bal.tab(
+  fmla,
+  data = analysis_data,
+  weights = analysis_data$w_ate,
+  method = "weighting",
+  estimand = "ATE",
+  un = TRUE
+)
+print(ipw_bal)
+
+love.plot(
+  ipw_bal,
+  stats = "mean.diffs",
+  abs = TRUE,
+  thresholds = c(m = 0.1),
+  var.order = "unadjusted"
+)
+
+ipw_tab <- analysis_data %>%
+  group_by(treat) %>%
+  summarise(
+    weighted_response = weighted.mean(outcome, w_ate),
+    .groups = "drop"
+  )
+
+print(ipw_tab)
+
+ipw_ate <- with(ipw_tab,
+                weighted_response[treat == "channel_26"] -
+                  weighted_response[treat == "channel_124"])
+
+cat("\nIPW ATE =", round(ipw_ate, 5), "\n")
+
+# ------------------------------------------------
+# C. AIPW
+# ------------------------------------------------
+cat("\n==============================\n")
+cat("C. AUGMENTED IPW\n")
+cat("==============================\n")
+
+outcome_model <- glm(
+  outcome ~ treat_num + gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+# Predicted outcome under T=1 and T=0
+new1 <- analysis_data
+new1$treat_num <- 1
+
+new0 <- analysis_data
+new0$treat_num <- 0
+
+m1 <- predict(outcome_model, newdata = new1, type = "response")
+m0 <- predict(outcome_model, newdata = new0, type = "response")
+e  <- analysis_data$pscore
+Tt <- analysis_data$treat_num
+Y  <- analysis_data$outcome
+
+aipw_score <- (m1 - m0) + Tt * (Y - m1) / e - (1 - Tt) * (Y - m0) / (1 - e)
+
+aipw_ate <- mean(aipw_score)
+aipw_se  <- sd(aipw_score) / sqrt(nrow(analysis_data))
+aipw_ci  <- c(aipw_ate - 1.96 * aipw_se, aipw_ate + 1.96 * aipw_se)
+
+cat("\nAIPW ATE =", round(aipw_ate, 5), "\n")
+cat("AIPW SE  =", round(aipw_se, 5), "\n")
+cat("95% CI   = [", round(aipw_ci[1], 5), ",", round(aipw_ci[2], 5), "]\n")
+
+# ------------------------------------------------
+# D. COMPARISON TABLE
+# ------------------------------------------------
+cat("\n==============================\n")
+cat("D. COMPARISON OF ESTIMATES\n")
+cat("==============================\n")
+
+comparison <- tibble(
+  estimator = c("Raw difference", "PSM_ATT", "IPW_ATE", "AIPW_ATE"),
+  estimate = c(
+    mean(analysis_data$outcome[analysis_data$treat_num == 1]) -
+      mean(analysis_data$outcome[analysis_data$treat_num == 0]),
+    psm_att,
+    ipw_ate,
+    aipw_ate
+  )
+)
+
+print(comparison)
+
+```
+
+```{r}
+# ============================================
+# PHAN 8: PLACEBO / FALSIFICATION
+# Permutation placebo using AIPW
+# ============================================
+
+rm(list = c("analysis_data", "true_aipw", "permute_aipw_once", "placebo_estimates"))
+
+library(tidyverse)
+library(janitor)
+
+set.seed(12345)
+
+# 1. Rebuild analysis sample
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    treat = factor(if_else(policy_sales_channel == 26, 1, 0),
+                   levels = c(0, 1),
+                   labels = c("channel_124", "channel_26")),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+# 2. Formula
+fmla <- treat_num ~ gender + age + region_code + previously_insured +
+  vehicle_age + vehicle_damage + log_annual_premium + vintage
+
+# 3. Compute true AIPW again
+ps_model_true <- glm(
+  fmla,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+analysis_data$pscore_true <- predict(ps_model_true, type = "response")
+
+outcome_model_true <- glm(
+  outcome ~ treat_num + gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+new1 <- analysis_data
+new1$treat_num <- 1
+
+new0 <- analysis_data
+new0$treat_num <- 0
+
+m1_true <- predict(outcome_model_true, newdata = new1, type = "response")
+m0_true <- predict(outcome_model_true, newdata = new0, type = "response")
+
+Y <- analysis_data$outcome
+Tt <- analysis_data$treat_num
+e  <- analysis_data$pscore_true
+
+true_score <- (m1_true - m0_true) + Tt * (Y - m1_true) / e - (1 - Tt) * (Y - m0_true) / (1 - e)
+true_aipw <- mean(true_score)
+
+cat("\n==============================\n")
+cat("1. TRUE AIPW EFFECT\n")
+cat("==============================\n")
+print(true_aipw)
+
+# 4. Function for one placebo permutation
+permute_aipw_once <- function(dat) {
+  dat_perm <- dat
+  dat_perm$treat_num <- sample(dat_perm$treat_num)
+  
+  # PS model with permuted treatment
+  ps_model_perm <- glm(
+    treat_num ~ gender + age + region_code + previously_insured +
+      vehicle_age + vehicle_damage + log_annual_premium + vintage,
+    family = binomial(link = "logit"),
+    data = dat_perm
+  )
+  
+  dat_perm$pscore <- predict(ps_model_perm, type = "response")
+  
+  # Outcome model with permuted treatment
+  outcome_model_perm <- glm(
+    outcome ~ treat_num + gender + age + region_code + previously_insured +
+      vehicle_age + vehicle_damage + log_annual_premium + vintage,
+    family = binomial(link = "logit"),
+    data = dat_perm
+  )
+  
+  new1p <- dat_perm
+  new1p$treat_num <- 1
+  
+  new0p <- dat_perm
+  new0p$treat_num <- 0
+  
+  m1p <- predict(outcome_model_perm, newdata = new1p, type = "response")
+  m0p <- predict(outcome_model_perm, newdata = new0p, type = "response")
+  
+  Yp <- dat_perm$outcome
+  Tp <- dat_perm$treat_num
+  ep <- dat_perm$pscore
+  
+  score_perm <- (m1p - m0p) + Tp * (Yp - m1p) / ep - (1 - Tp) * (Yp - m0p) / (1 - ep)
+  
+  mean(score_perm)
+}
+
+# 5. Run placebo replications
+# Ban dau de 100 lan cho gon, neu may chay tot co the tang len 200
+B <- 100
+
+cat("\n==============================\n")
+cat("2. RUNNING PLACEBO PERMUTATIONS\n")
+cat("==============================\n")
+cat("Number of permutations =", B, "\n")
+
+placebo_estimates <- replicate(B, permute_aipw_once(analysis_data))
+
+# 6. Summaries
+cat("\n==============================\n")
+cat("3. PLACEBO SUMMARY\n")
+cat("==============================\n")
+print(summary(placebo_estimates))
+
+cat("\nPlacebo quantiles:\n")
+print(quantile(placebo_estimates,
+               probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+               na.rm = TRUE))
+
+cat("\nPlacebo mean:\n")
+print(mean(placebo_estimates))
+
+cat("\nPlacebo sd:\n")
+print(sd(placebo_estimates))
+
+# 7. Compare true effect vs placebo
+cat("\n==============================\n")
+cat("4. TRUE EFFECT VS PLACEBO\n")
+cat("==============================\n")
+
+cat("True AIPW effect =", round(true_aipw, 5), "\n")
+cat("Mean placebo effect =", round(mean(placebo_estimates), 5), "\n")
+
+# empirical two-sided p-value
+emp_p <- mean(abs(placebo_estimates) >= abs(true_aipw))
+cat("Empirical placebo p-value =", round(emp_p, 5), "\n")
+
+# z-style separation
+z_sep <- (true_aipw - mean(placebo_estimates)) / sd(placebo_estimates)
+cat("Standardized separation from placebo mean =", round(z_sep, 3), "\n")
+
+# 8. Plot placebo distribution
+hist(placebo_estimates,
+     breaks = 20,
+     main = "Placebo distribution of AIPW estimates",
+     xlab = "Placebo AIPW estimate",
+     col = "lightgray",
+     border = "white")
+
+abline(v = true_aipw, col = "red", lwd = 2)
+
+# 9. Optional density plot
+plot(density(placebo_estimates),
+     main = "True effect vs placebo distribution",
+     xlab = "AIPW estimate")
+abline(v = true_aipw, col = "red", lwd = 2)
+```
+
+```{r}
+# ============================================
+# PHAN 9: CAUSAL FOREST
+# ============================================
+
+rm(list = c(
+  "analysis_data", "X", "Y", "W", "forest",
+  "tau_hat", "ate_cf", "vi", "cf_summary",
+  "subgroup_summary"
+))
+
+library(tidyverse)
+library(janitor)
+library(grf)
+
+set.seed(12345)
+
+# 1. Rebuild analysis sample
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(vehicle_age, levels = c("< 1 Year", "1-2 Year", "> 2 Years")),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+# 2. Create model matrix for X
+X <- model.matrix(
+  ~ gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  data = analysis_data
+)[, -1]   # drop intercept
+
+Y <- analysis_data$outcome
+W <- analysis_data$treat_num
+
+cat("\n==============================\n")
+cat("1. DIMENSIONS FOR FOREST\n")
+cat("==============================\n")
+print(dim(X))
+print(length(Y))
+print(length(W))
+
+# 3. Fit causal forest
+forest <- causal_forest(
+  X = X,
+  Y = Y,
+  W = W,
+  num.trees = 1000,
+  honesty = TRUE,
+  seed = 12345
+)
+
+cat("\n==============================\n")
+cat("2. FOREST FITTED\n")
+cat("==============================\n")
+print(forest)
+
+# 4. ATE from forest
+ate_cf <- average_treatment_effect(forest)
+
+cat("\n==============================\n")
+cat("3. FOREST ATE\n")
+cat("==============================\n")
+print(ate_cf)
+
+# 5. Individual treatment effects
+tau_hat <- predict(forest)$predictions
+
+cat("\n==============================\n")
+cat("4. SUMMARY OF CATE (tau_hat)\n")
+cat("==============================\n")
+print(summary(tau_hat))
+
+cat("\nQuantiles of tau_hat:\n")
+print(quantile(tau_hat,
+               probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+               na.rm = TRUE))
+
+# 6. Variable importance
+vi <- variable_importance(forest)
+
+vi_table <- tibble(
+  variable = colnames(X),
+  importance = vi
+) %>%
+  arrange(desc(importance))
+
+cat("\n==============================\n")
+cat("5. VARIABLE IMPORTANCE\n")
+cat("==============================\n")
+print(head(vi_table, 20))
+
+# 7. Histogram of CATE
+hist(tau_hat,
+     breaks = 30,
+     main = "Distribution of estimated CATE",
+     xlab = "Estimated treatment effect",
+     col = "lightgray",
+     border = "white")
+
+# 8. Add tau_hat back to data for subgroup summaries
+analysis_data <- analysis_data %>%
+  mutate(
+    tau_hat = tau_hat,
+    age_group = case_when(
+      age < 40 ~ "<40",
+      age < 55 ~ "40-54",
+      TRUE ~ "55+"
+    ),
+    premium_group = case_when(
+      log_annual_premium < quantile(log_annual_premium, 0.33) ~ "Low premium",
+      log_annual_premium < quantile(log_annual_premium, 0.67) ~ "Mid premium",
+      TRUE ~ "High premium"
+    )
+  )
+
+
+cat("\n==============================\n")
+cat("6. SUBGROUP HTE SUMMARY\n")
+cat("==============================\n")
+print(subgroup_summary)
+
+# 10. Top and bottom effect groups
+cat("\n==============================\n")
+cat("7. TOP / BOTTOM CATE\n")
+cat("==============================\n")
+
+cf_summary <- tibble(tau_hat = tau_hat) %>%
+  summarise(
+    mean_tau = mean(tau_hat),
+    sd_tau = sd(tau_hat),
+    p01 = quantile(tau_hat, 0.01),
+    p05 = quantile(tau_hat, 0.05),
+    p25 = quantile(tau_hat, 0.25),
+    p50 = quantile(tau_hat, 0.50),
+    p75 = quantile(tau_hat, 0.75),
+    p95 = quantile(tau_hat, 0.95),
+    p99 = quantile(tau_hat, 0.99)
+  )
+
+print(cf_summary)
+```
+
+```{r}
+subgroup_summary <- bind_rows(
+  analysis_data %>%
+    group_by(age_group) %>%
+    summarise(
+      subgroup = paste0("Age: ", first(age_group)),
+      n = n(),
+      mean_tau = mean(tau_hat),
+      sd_tau = sd(tau_hat),
+      .groups = "drop"
+    ),
+  
+  analysis_data %>%
+    group_by(previously_insured) %>%
+    summarise(
+      subgroup = paste0("Previously insured: ", first(previously_insured)),
+      n = n(),
+      mean_tau = mean(tau_hat),
+      sd_tau = sd(tau_hat),
+      .groups = "drop"
+    ),
+  
+  analysis_data %>%
+    group_by(vehicle_damage) %>%
+    summarise(
+      subgroup = paste0("Vehicle damage: ", first(vehicle_damage)),
+      n = n(),
+      mean_tau = mean(tau_hat),
+      sd_tau = sd(tau_hat),
+      .groups = "drop"
+    ),
+  
+  analysis_data %>%
+    group_by(vehicle_age) %>%
+    summarise(
+      subgroup = paste0("Vehicle age: ", first(vehicle_age)),
+      n = n(),
+      mean_tau = mean(tau_hat),
+      sd_tau = sd(tau_hat),
+      .groups = "drop"
+    ),
+  
+  analysis_data %>%
+    group_by(premium_group) %>%
+    summarise(
+      subgroup = paste0("Premium: ", first(premium_group)),
+      n = n(),
+      mean_tau = mean(tau_hat),
+      sd_tau = sd(tau_hat),
+      .groups = "drop"
+    )
+)
+
+print(subgroup_summary)
+
+cf_summary <- tibble(tau_hat = tau_hat) %>%
+  summarise(
+    mean_tau = mean(tau_hat),
+    sd_tau = sd(tau_hat),
+    p01 = quantile(tau_hat, 0.01),
+    p05 = quantile(tau_hat, 0.05),
+    p25 = quantile(tau_hat, 0.25),
+    p50 = quantile(tau_hat, 0.50),
+    p75 = quantile(tau_hat, 0.75),
+    p95 = quantile(tau_hat, 0.95),
+    p99 = quantile(tau_hat, 0.99)
+  )
+
+print(cf_summary)
+```
+
+```{r}
+# ============================================
+# PHAN 0: PREPARE ANALYSIS DATA
+# ============================================
+
+packages <- c(
+  "tidyverse", "janitor", "grf"
+)
+
+new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
+if (length(new_packages) > 0) {
+  install.packages(new_packages)
+}
+
+library(tidyverse)
+library(janitor)
+library(grf)
+
+set.seed(12345)
+
+analysis_data <- read_csv(file.choose(), show_col_types = FALSE) %>%
+  clean_names() %>%
+  filter(policy_sales_channel %in% c(26, 124)) %>%
+  transmute(
+    treat_num = if_else(policy_sales_channel == 26, 1, 0),
+    treat = factor(
+      if_else(policy_sales_channel == 26, 1, 0),
+      levels = c(0, 1),
+      labels = c("channel_124", "channel_26")
+    ),
+    outcome = response,
+    gender = factor(gender),
+    age = age,
+    region_code = factor(region_code),
+    previously_insured = factor(previously_insured),
+    vehicle_age = factor(
+      vehicle_age,
+      levels = c("< 1 Year", "1-2 Year", "> 2 Years")
+    ),
+    vehicle_damage = factor(vehicle_damage),
+    log_annual_premium = log1p(annual_premium),
+    vintage = vintage
+  )
+
+fmla_treat <- treat_num ~ gender + age + region_code +
+  previously_insured + vehicle_age + vehicle_damage +
+  log_annual_premium + vintage
+
+fmla_outcome <- outcome ~ treat_num + gender + age + region_code +
+  previously_insured + vehicle_age + vehicle_damage +
+  log_annual_premium + vintage
+
+cat("\n==============================\n")
+cat("DATA CHECK\n")
+cat("==============================\n")
+print(dim(analysis_data))
+print(table(analysis_data$treat))
+print(mean(analysis_data$outcome))
+```
+
+```{r}
+# ============================================
+# PHAN 1: CAUSAL FOREST DIAGNOSTICS
+# ============================================
+
+library(tidyverse)
+library(grf)
+
+set.seed(12345)
+
+# 1. Create X, Y, W
+X <- model.matrix(
+  ~ gender + age + region_code + previously_insured +
+    vehicle_age + vehicle_damage + log_annual_premium + vintage,
+  data = analysis_data
+)[, -1]
+
+Y <- analysis_data$outcome
+W <- analysis_data$treat_num
+
+cat("\n==============================\n")
+cat("1. FOREST INPUT DIMENSIONS\n")
+cat("==============================\n")
+print(dim(X))
+print(length(Y))
+print(length(W))
+
+# 2. Fit causal forest
+forest <- causal_forest(
+  X = X,
+  Y = Y,
+  W = W,
+  num.trees = 1000,
+  honesty = TRUE,
+  seed = 12345
+)
+
+cat("\n==============================\n")
+cat("2. FOREST OBJECT\n")
+cat("==============================\n")
+print(forest)
+
+# 3. ATE with different target samples
+cat("\n==============================\n")
+cat("3. FOREST ATE BY TARGET SAMPLE\n")
+cat("==============================\n")
+
+ate_all <- average_treatment_effect(
+  forest,
+  target.sample = "all"
+)
+
+ate_treated <- average_treatment_effect(
+  forest,
+  target.sample = "treated"
+)
+
+ate_control <- average_treatment_effect(
+  forest,
+  target.sample = "control"
+)
+
+ate_overlap <- average_treatment_effect(
+  forest,
+  target.sample = "overlap"
+)
+
+forest_ate_table <- tibble(
+  target_sample = c("All", "Treated", "Control", "Overlap"),
+  estimate = c(
+    ate_all["estimate"],
+    ate_treated["estimate"],
+    ate_control["estimate"],
+    ate_overlap["estimate"]
+  ),
+  std_error = c(
+    ate_all["std.err"],
+    ate_treated["std.err"],
+    ate_control["std.err"],
+    ate_overlap["std.err"]
+  ),
+  ci_low = estimate - 1.96 * std_error,
+  ci_high = estimate + 1.96 * std_error
+)
+
+print(forest_ate_table)
+
+# 4. Calibration test
+cat("\n==============================\n")
+cat("4. TEST CALIBRATION\n")
+cat("==============================\n")
+
+calibration_result <- test_calibration(forest)
+print(calibration_result)
+
+# 5. CATE distribution
+tau_hat <- predict(forest)$predictions
+
+cat("\n==============================\n")
+cat("5. CATE SUMMARY\n")
+cat("==============================\n")
+print(summary(tau_hat))
+
+cat("\nCATE quantiles:\n")
+print(
+  quantile(
+    tau_hat,
+    probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+    na.rm = TRUE
+  )
+)
+
+# 6. Variable importance
+vi <- variable_importance(forest)
+
+vi_table <- tibble(
+  variable = colnames(X),
+  importance = as.numeric(vi)
+) %>%
+  arrange(desc(importance))
+
+cat("\n==============================\n")
+cat("6. VARIABLE IMPORTANCE\n")
+cat("==============================\n")
+print(head(vi_table, 20))
+
+# 7. Histogram CATE
+hist(
+  tau_hat,
+  breaks = 30,
+  main = "Distribution of estimated CATE",
+  xlab = "Estimated treatment effect",
+  col = "lightgray",
+  border = "white"
+)
+abline(v = mean(tau_hat), col = "red", lwd = 2)
+```
+
+```{r}
+# ============================================
+# PHAN 2: TRIMMED AIPW ROBUSTNESS
+# ============================================
+
+library(tidyverse)
+
+# Function tinh AIPW ATE
+estimate_aipw <- function(dat) {
+  
+  ps_model <- glm(
+    fmla_treat,
+    family = binomial(link = "logit"),
+    data = dat
+  )
+  
+  dat$pscore <- predict(ps_model, type = "response")
+  
+  outcome_model <- glm(
+    fmla_outcome,
+    family = binomial(link = "logit"),
+    data = dat
+  )
+  
+  new1 <- dat
+  new1$treat_num <- 1
+  
+  new0 <- dat
+  new0$treat_num <- 0
+  
+  m1 <- predict(outcome_model, newdata = new1, type = "response")
+  m0 <- predict(outcome_model, newdata = new0, type = "response")
+  
+  Y <- dat$outcome
+  Tt <- dat$treat_num
+  e <- dat$pscore
+  
+  aipw_score <- (m1 - m0) +
+    Tt * (Y - m1) / e -
+    (1 - Tt) * (Y - m0) / (1 - e)
+  
+  ate <- mean(aipw_score)
+  se <- sd(aipw_score) / sqrt(nrow(dat))
+  
+  tibble(
+    n = nrow(dat),
+    ate = ate,
+    se = se,
+    ci_low = ate - 1.96 * se,
+    ci_high = ate + 1.96 * se
+  )
+}
+
+# 1. Full sample AIPW
+cat("\n==============================\n")
+cat("1. FULL SAMPLE AIPW\n")
+cat("==============================\n")
+
+aipw_full <- estimate_aipw(analysis_data)
+print(aipw_full)
+
+# 2. Lay propensity score tren full sample de xac dinh trimmed support
+ps_model_full <- glm(
+  fmla_treat,
+  family = binomial(link = "logit"),
+  data = analysis_data
+)
+
+analysis_data_ps <- analysis_data %>%
+  mutate(
+    pscore = predict(ps_model_full, type = "response")
+  )
+
+treated_ps <- analysis_data_ps$pscore[analysis_data_ps$treat_num == 1]
+control_ps <- analysis_data_ps$pscore[analysis_data_ps$treat_num == 0]
+
+lower_trim <- max(
+  quantile(treated_ps, 0.01),
+  quantile(control_ps, 0.01)
+)
+
+upper_trim <- min(
+  quantile(treated_ps, 0.99),
+  quantile(control_ps, 0.99)
+)
+
+cat("\n==============================\n")
+cat("2. TRIMMED SUPPORT BOUNDS\n")
+cat("==============================\n")
+cat("Lower trimmed bound =", round(lower_trim, 5), "\n")
+cat("Upper trimmed bound =", round(upper_trim, 5), "\n")
+
+analysis_trimmed <- analysis_data_ps %>%
+  filter(pscore >= lower_trim, pscore <= upper_trim) %>%
+  select(-pscore)
+
+cat("\nTrimmed sample size:\n")
+print(dim(analysis_trimmed))
+print(table(analysis_trimmed$treat))
+
+cat("\nProportion kept:\n")
+print(nrow(analysis_trimmed) / nrow(analysis_data))
+
+# 3. AIPW on trimmed sample
+cat("\n==============================\n")
+cat("3. TRIMMED SAMPLE AIPW\n")
+cat("==============================\n")
+
+aipw_trimmed <- estimate_aipw(analysis_trimmed)
+print(aipw_trimmed)
+
+# 4. Compare full vs trimmed
+cat("\n==============================\n")
+cat("4. AIPW FULL VS TRIMMED\n")
+cat("==============================\n")
+
+aipw_robustness_table <- bind_rows(
+  aipw_full %>% mutate(sample = "Full sample"),
+  aipw_trimmed %>% mutate(sample = "Trimmed 1%-99% support")
+) %>%
+  select(sample, n, ate, se, ci_low, ci_high)
+
+print(aipw_robustness_table)
+```
+
+```{r}
+# ============================================
+# PHAN 3: IPW PLACEBO TEST
+# ============================================
+
+library(tidyverse)
+
+set.seed(12345)
+
+# Function tinh stabilized IPW ATE
+estimate_ipw <- function(dat) {
+  
+  ps_model <- glm(
+    treat_num ~ gender + age + region_code +
+      previously_insured + vehicle_age + vehicle_damage +
+      log_annual_premium + vintage,
+    family = binomial(link = "logit"),
+    data = dat
+  )
+  
+  dat$pscore <- predict(ps_model, type = "response")
+  
+  p_treat <- mean(dat$treat_num)
+  
+  dat <- dat %>%
+    mutate(
+      w_ate = if_else(
+        treat_num == 1,
+        p_treat / pscore,
+        (1 - p_treat) / (1 - pscore)
+      )
+    )
+  
+  ipw_tab <- dat %>%
+    group_by(treat_num) %>%
+    summarise(
+      weighted_response = weighted.mean(outcome, w_ate),
+      .groups = "drop"
+    )
+  
+  ipw_ate <- ipw_tab$weighted_response[ipw_tab$treat_num == 1] -
+    ipw_tab$weighted_response[ipw_tab$treat_num == 0]
+  
+  return(ipw_ate)
+}
+
+# 1. True IPW effect
+cat("\n==============================\n")
+cat("1. TRUE IPW EFFECT\n")
+cat("==============================\n")
+
+true_ipw <- estimate_ipw(analysis_data)
+print(true_ipw)
+
+# 2. Function placebo 1 lan
+permute_ipw_once <- function(dat) {
+  
+  dat_perm <- dat
+  dat_perm$treat_num <- sample(dat_perm$treat_num)
+  
+  estimate_ipw(dat_perm)
+}
+
+# 3. Chay placebo
+B <- 50
+
+cat("\n==============================\n")
+cat("2. RUNNING IPW PLACEBO\n")
+cat("==============================\n")
+cat("Number of permutations =", B, "\n")
+
+system.time({
+  placebo_ipw <- replicate(B, permute_ipw_once(analysis_data))
+})
+
+# 4. Placebo summary
+cat("\n==============================\n")
+cat("3. IPW PLACEBO SUMMARY\n")
+cat("==============================\n")
+
+print(summary(placebo_ipw))
+
+cat("\nPlacebo quantiles:\n")
+print(
+  quantile(
+    placebo_ipw,
+    probs = c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1),
+    na.rm = TRUE
+  )
+)
+
+placebo_ipw_mean <- mean(placebo_ipw)
+placebo_ipw_sd <- sd(placebo_ipw)
+emp_p_ipw <- mean(abs(placebo_ipw) >= abs(true_ipw))
+z_sep_ipw <- (true_ipw - placebo_ipw_mean) / placebo_ipw_sd
+
+cat("\n==============================\n")
+cat("4. TRUE IPW VS PLACEBO\n")
+cat("==============================\n")
+cat("True IPW effect =", round(true_ipw, 5), "\n")
+cat("Placebo IPW mean =", round(placebo_ipw_mean, 5), "\n")
+cat("Placebo IPW sd =", round(placebo_ipw_sd, 5), "\n")
+cat("Empirical placebo p-value =", round(emp_p_ipw, 5), "\n")
+cat("Standardized separation =", round(z_sep_ipw, 3), "\n")
+
+# 5. Ket qua gom bang
+ipw_placebo_table <- tibble(
+  true_ipw = true_ipw,
+  placebo_mean = placebo_ipw_mean,
+  placebo_sd = placebo_ipw_sd,
+  empirical_p_value = emp_p_ipw,
+  standardized_separation = z_sep_ipw,
+  B = B
+)
+
+print(ipw_placebo_table)
+
+# 6. Plot
+hist(
+  placebo_ipw,
+  breaks = 20,
+  main = "Placebo distribution of IPW estimates",
+  xlab = "Placebo IPW estimate",
+  col = "lightgray",
+  border = "white"
+)
+
+abline(v = true_ipw, col = "red", lwd = 2)
+abline(v = 0, col = "blue", lwd = 2, lty = 2)
+```
+
+```{r}
+# Corrected empirical p-value
+emp_p_ipw_corrected <- 
+  (sum(abs(placebo_ipw) >= abs(true_ipw)) + 1) / (length(placebo_ipw) + 1)
+
+emp_p_ipw_corrected
+```
+
+```{r}
+ggplot(plot_data, aes(x = placebo_ipw)) +
+  geom_histogram(
+    bins = 20,
+    fill = "grey80",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  labs(
+    title = "Placebo Distribution of IPW Estimates",
+    subtitle = paste0(
+      "True IPW effect = ", round(true_ipw, 4),
+      "; placebo mean = ", round(mean(placebo_ipw), 5)
+    ),
+    x = "Placebo IPW estimate",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+library(DiagrammeR)
+library(DiagrammeRsvg)
+library(rsvg)
+
+fig_motivation <- grViz("
+digraph research_motivation {
+
+  graph [
+    layout = dot,
+    rankdir = LR,
+    bgcolor = white,
+    labelloc = t,
+    label = 'Research Motivation Framework',
+    fontsize = 22,
+    fontname = 'Arial'
+  ]
+
+  node [
+    shape = box,
+    style = 'rounded,filled',
+    fontname = 'Arial',
+    fontsize = 16,
+    penwidth = 1.8,
+    margin = 0.18
+  ]
+
+  edge [
+    fontname = 'Arial',
+    fontsize = 13,
+    arrowsize = 0.8,
+    penwidth = 1.6
+  ]
+
+  customer [
+    label = 'Customer Characteristics\\nAge, region, insurance history,\\nvehicle profile, premium',
+    fillcolor = '#E6EEF8',
+    color = '#234C86'
+  ]
+
+  channel [
+    label = 'Sales Channel Assignment\\nPolicy Sales Channel\\n26 vs 124',
+    fillcolor = '#365E9D',
+    fontcolor = white,
+    color = '#234C86'
+  ]
+
+  response [
+    label = 'Customer Response\\nResponse = 1 or 0',
+    fillcolor = '#DDECCB',
+    color = '#5D7F3A'
+  ]
+
+  confounding [
+    label = 'Potential Confounding\\nObserved customer differences may affect\\nboth channel assignment and response',
+    fillcolor = '#FCEEEE',
+    color = '#8A4A4A',
+    style = 'rounded,filled,dashed'
+  ]
+
+  customer -> channel [
+    label = 'may influence'
+  ]
+
+  customer -> response [
+    label = 'may influence'
+  ]
+
+  channel -> response [
+    label = 'causal question',
+    penwidth = 2.5
+  ]
+
+  confounding -> channel [
+    style = dashed,
+    color = '#444444'
+  ]
+
+  confounding -> response [
+    style = dashed,
+    color = '#444444'
+  ]
+}
+")
+
+fig_motivation
+```
